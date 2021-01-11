@@ -458,9 +458,8 @@ impl Source {
     async fn ready(&self, dir: usize) -> io::Result<()> {
         let mut ticks = None;
         let mut index = None;
-        let mut _guard = None;
 
-        future::poll_fn(|cx| {
+        let ret = future::poll_fn(|cx| {
             let mut state = self.state.lock().unwrap();
 
             // Check if the reactor has delivered an event.
@@ -479,10 +478,6 @@ impl Source {
                 Some(i) => i,
                 None => {
                     let i = state[dir].wakers.insert(None);
-                    _guard = Some(CallOnDrop(move || {
-                        let mut state = self.state.lock().unwrap();
-                        state[dir].wakers.remove(i);
-                    }));
                     index = Some(i);
                     ticks = Some((Reactor::get().ticker(), state[dir].tick));
                     i
@@ -504,15 +499,12 @@ impl Source {
 
             Poll::Pending
         })
-        .await
-    }
-}
+        .await;
 
-/// Runs a closure when dropped.
-struct CallOnDrop<F: Fn()>(F);
-
-impl<F: Fn()> Drop for CallOnDrop<F> {
-    fn drop(&mut self) {
-        (self.0)();
+        if let Some(i) = index {
+            let mut state = self.state.lock().unwrap();
+            state[dir].wakers.remove(i);
+        }
+        ret
     }
 }
